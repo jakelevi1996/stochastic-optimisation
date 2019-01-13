@@ -5,8 +5,8 @@ import objectives as o
 
 def plot_objective(
     objective=o.schwefel, x0lims=[-500, 500], x1lims=[-500, 500], n=200,
-    filename="Images/Schwefel", title="2D Schwefel function", figsize=[8, 6],
-    levels=15
+    filename="Schwefel", title="2D Schwefel function", figsize=[8, 6],
+    levels=15, x_list=None, x_list_d=None
 ):
     x0 = np.linspace(*x0lims, n)
     x1 = np.linspace(*x1lims, n)
@@ -16,10 +16,18 @@ def plot_objective(
     c = objective(X)
     plt.figure(figsize=figsize)
     plt.contourf(xx0, xx1, c, levels)
+
+    if x_list is not None:
+        x0, x1 = zip(*x_list)
+        plt.plot(x0, x1, 'ro', alpha=0.3)
+    if x_list_d is not None:
+        x0, x1 = zip(*x_list_d)
+        plt.plot(x0, x1, 'go', alpha=1.0, markeredgecolor="k")
+
     plt.title(title)
-    plt.axis("tight")
     plt.colorbar()
-    plt.savefig(filename)
+    plt.axis("tight")
+    plt.savefig("Images/" + filename)
     plt.close()
 
 def plot_rosenbrock():
@@ -28,6 +36,21 @@ def plot_rosenbrock():
         filename="Images/Rosenbrock", title="Rosenbrock function",
         levels=np.linspace(0, 50, 15)
     )
+
+def plot_fitness_history(
+    f_list, filename="Schwefel", title="2D Schwefel function", figsize=[8, 6],
+    # f_list_d=None
+):
+    plt.figure(figsize=figsize)
+    plt.plot(f_list, alpha=0.8)
+
+    plt.title(title)
+    plt.grid(True)
+    # plt.axis("tight")
+    plt.xlabel("Evaluation number")
+    plt.ylabel("Fitness")
+    plt.savefig("Images/" + filename)
+    plt.close()
 
 if __name__ == "__main__":
     plot_objective()

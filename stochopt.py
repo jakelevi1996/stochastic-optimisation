@@ -17,17 +17,27 @@ class Solution():
 class TabuSearch():
     def __init__(self): pass
     
+    def reset_memory(self):
+        # Clear short and medium term memory and reset delta
+        self.stm, self.mtm_x, self.mtm_f = [], [], []
+        self.delta = self.DELTA_INITIAL
+    
     def evaluate_objective(self, x):
         # Wrapper for evaluating and recording the objective function
         f = self.objective(x)
         self.f_list.append(f)
         self.n_evals += 1
+        # Check to see if this fitness is the best so far
+        if f < self.f_best and self.n_evals <= self.MAX_EVALS:
+            self.f_best = f
+            self.x_best = x
+            print("***New best solution = {:.4}".format(f))
         
         return f
 
-    # Method for checking if an x value is in the short-term memory
+    # Check if x is in the short-term memory
     def x_in_stm(self, x): return any((x == xm).all() for xm in self.stm)
-    # Method for checking if an x value is in the medium-term memory
+    # Check if x is in the medium-term memory
     def x_in_mtm(self, x): return any((x == xm).all() for xm in self.mtm_x)
 
     def new_base_point(self, x, f=None):
@@ -117,33 +127,38 @@ class TabuSearch():
         self.x_diverse.append(x)
         self.f_diverse.append(f)
         # Clear short and medium term memory? Reset delta?
+        self.reset_memory()
 
         return x, f
 
     def minimise(
         self, objective=o.schwefel, max_evals=10000, ndims=5, random_seed=0,
-        n_stm=7, n_mtm=4, delta_initial=10, delta_reduction_factor=0.3,
-        intensify_counter=12, diversify_counter=17, reduce_counter=25,
+        n_stm=7, n_mtm=4, delta_initial=10, delta_reduction_factor=0.2,
+        # intensify_counter=12, diversify_counter=17, reduce_counter=25,
+        max_counter=25,
         x_min=-500, x_max=500, min_reduction=1.0
     ):
         # Set random seed and objective function
         np.random.seed(random_seed)
         self.objective = objective
-        # Assign constant attributes for minimisation routine
+        # Assign constant attributes
         self.MAX_EVALS = max_evals
         self.N_DIMS = ndims
         self.N_STM, self.N_MTM = n_stm, n_mtm
+        self.DELTA_INITIAL = delta_initial
         self.X_MIN, self.X_MAX = x_min, x_max
-        # Initialise variable attributes for minimisation routine
+        # Initialise variable attributes
         self.x_list, self.f_list,  = [], []
         self.x_diverse, self.f_diverse = [], []
-        self.stm, self.mtm_x, self.mtm_f = [], [], []
-        self.delta, self.n_evals = delta_initial, 0
+        self.n_evals = 0
+        self.reset_memory()
+        self.x_best, self.f_best = None, np.inf
         # Find initial solution
         x_new, f_new = self.diversify()
         # Begin main loop
         counter = 0
-        max_counter = max(intensify_counter, diversify_counter, reduce_counter)
+        # max_counter = max(intensify_counter, diversify_counter, reduce_counter)
+        f_last_reduction = f_new
         while self.n_evals <= self.MAX_EVALS:
             # Perform local search
             x_old, f_old = x_new, f_new
@@ -158,44 +173,70 @@ class TabuSearch():
                     x_old, f_old = x_new, f_new
                     x_new, f_new, pm_ok = self.pattern_move(x_old, f_old, dx)
                     print("Pattern move {:.4} -> {:.4}".format(f_old, f_new))
+            # If previous local search didn't improve fitness, increase counter
             else:
                 counter += 1
-                print("Counter incremented to", counter)
-            # Intensify search if progress is not made
-            if counter == intensify_counter:
+                print("Counter ->", counter)
+            # Intensify or diversify search if progress is not being made
+            if counter >= max_counter:
                 x_old, f_old = x_new, f_new
                 x_new, f_new = self.intensify()
-                counter += 1
+                # Could be part of `intensify` method? :
+                self.delta = delta_reduction_factor * self.delta
                 print("Intensify {:.4} -> {:.4}".format(f_old, f_new))
                 # sleep(1)
-            # Diversify search if progress is not made
-            if counter == diversify_counter:
-                x_old, f_old = x_new, f_new
-                x_new, f_new = self.diversify()
-                counter += 1
-                print("Diversify {:.4} -> {:.4}".format(f_old, f_new))
-                # sleep(1)
-            # Reduce step size if progress is not made
-            if counter == reduce_counter:
-                self.delta = delta_reduction_factor * self.delta
-                counter += 1
-                print("Reducing step size")
-                # sleep(1)
-            if counter >= max_counter: counter = 0
+                # If most recent intensification gave bad reduction in fitness
+                if not f_last_reduction - f_new > min_reduction:
+                    # Diversify and start again
+                    print("Previous reduction {:.4} -> {:.4}".format(f_last_reduction, f_new))
+                    x_new, f_new = self.diversify()
+                    print("Diversifying")
+                # Either way, reset baseline fitness and counter
+                f_last_reduction = f_new
+                counter = 0
 
-            # Diversify...
-            # TEMP: why does the program hang?
-            # if all(x_new == x_old):
+            # # Intensify search if progress is not made
+            # if counter >= intensify_counter:
+            #     x_old, f_old = x_new, f_new
+            #     x_new, f_new = self.intensify()
+            #     counter += 1
+            #     print("Intensify {:.4} -> {:.4}".format(f_old, f_new))
+
+            #     # Reduce step size if progress is not made
+            #     if counter >= reduce_counter:
+            #         # Check reduction in fitness from previous reduction
+            #         if f_last_reduction - f_new > min_reduction:
+            #             # If significant, reduce delta and continue searching
+            #             self.delta = delta_reduction_factor * self.delta
+            #             print("Reducing step size")
+            #             sleep(1)
+            #         # Otherwise diversify and start again
+            #         else:
+            #             x_new, f_new = self.diversify()
+            #             print("Diversifying"), sleep(1)
+            #         # Either way, reset baseline fitness and counter
+            #         f_last_reduction = f_new
+            #         counter = 0
+            # # Diversify search if progress is not made
+            # if counter == diversify_counter:
             #     x_old, f_old = x_new, f_new
             #     x_new, f_new = self.diversify()
-            #     print("Diversifying")
+            #     counter += 1
+            #     print("Diversify {:.4} -> {:.4}".format(f_old, f_new))
+            #     # sleep(1)
+            # if counter >= max_counter: counter = 0
+
         self.f_list = self.f_list[:max_evals]
+
+        return self.x_best, self.f_best
 
 if __name__ == "__main__":
     ts = TabuSearch()
     # ts.minimise(max_evals=10000, ndims=2, n_stm=7)
     # ts.minimise(max_evals=300, ndims=2, n_stm=7)
-    ts.minimise(max_evals=3000, ndims=2, n_stm=300)
+    # print(ts.minimise(max_evals=3000, ndims=2, n_stm=7))
+    print(ts.minimise(max_evals=10000, ndims=2, n_stm=100, max_counter=50))
+    # print(ts.minimise(max_evals=10000, ndims=5, n_stm=300, max_counter=100))
     # print("\nx list:")
     # for x in ts.x_list: print(x)
     # print("\nf list:")

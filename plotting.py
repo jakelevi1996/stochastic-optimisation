@@ -6,7 +6,7 @@ import objectives as o
 def plot_objective(
     objective=o.schwefel, x0lims=[-500, 500], x1lims=[-500, 500], n=200,
     filename="Schwefel", title="2D Schwefel function", figsize=[8, 6],
-    levels=15, x_list=None, x_list_d=None
+    levels=15, x_list=None, x_list_d=None, x_list_i=None,
 ):
     x0 = np.linspace(*x0lims, n)
     x1 = np.linspace(*x1lims, n)
@@ -17,16 +17,24 @@ def plot_objective(
     plt.figure(figsize=figsize)
     plt.contourf(xx0, xx1, c, levels)
 
+    legend = []
     if x_list is not None:
         x0, x1 = zip(*x_list)
         plt.plot(x0, x1, 'ro', alpha=0.3)
+        legend.append("Base point")
     if x_list_d is not None:
         x0, x1 = zip(*x_list_d)
         plt.plot(x0, x1, 'go', alpha=1.0, markeredgecolor="k")
+        legend.append("Diversification point")
+    if x_list_i is not None:
+        x0, x1 = zip(*x_list_i)
+        plt.plot(x0, x1, 'bo', alpha=0.3, markeredgecolor="k")
+        legend.append("Intensification point")
 
     plt.title(title)
     plt.colorbar()
     plt.axis("tight")
+    if len(legend) > 1: plt.legend(legend)
     plt.savefig("Images/" + filename)
     plt.close()
 

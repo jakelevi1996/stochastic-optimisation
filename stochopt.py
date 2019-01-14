@@ -127,6 +127,8 @@ class TabuSearch(Minimiser):
         x = np.mean(self.mtm_x, axis=0)
         # Add as new base point
         f = self.new_base_point(x)
+        self.x_intense.append(x)
+        self.f_intense.append(f)
 
         return x, f
         
@@ -161,6 +163,7 @@ class TabuSearch(Minimiser):
         # Initialise variable attributes
         self.x_list, self.f_list,  = [], []
         self.x_diverse, self.f_diverse = [], []
+        self.x_intense, self.f_intense = [], []
         self.n_evals = 0
         self.reset_memory()
         self.x_best, self.f_best = None, np.inf
@@ -208,20 +211,40 @@ class TabuSearch(Minimiser):
         return self.x_best, self.f_best
 
 class Particle():
-    def __init__(self, n_dims, x_min, x_max, more_args="..."):
-        # self.pbest = None
-        self.x = None
-        self.v = None
-        self.f_best = np.inf
-        self.x_best = None # (this one is actually none)
-        # ...
+    def __init__(
+        self, n_dims, x_min, x_max, p_inc, g_inc, v_max, v_decay, swarm
+    ):
+        # Assign constant attributes
+        self.N_DIMS = n_dims
+        self.X_MIN, self.X_MAX = x_min, x_max
+        self.P_INC, self.G_INC = p_inc, g_inc
+        self.V_MAX, self.V_DECAY = v_max, v_decay
+        # Initialise position
+        self.x = np.random.uniform(x_min, x_max, n_dims)
+        x = self.x.copy()
+        self.x_best = x
+        swarm.x_list.append(x)
+        # Initialise velocity
+        self.v = np.random.uniform(-v_max, v_max, n_dims)
+        # Store fitness of initial position
+        self.f_best = swarm.evaluate_objective(x)
     
-    def move(self, gbest):
-        self.v += None
+    def update_v(self, swarm):
+        # Update velocity (try ND uniform RV?)
+        self.v *= self.V_DECAY
+        self.v += self.P_INC * np.random.uniform() * (self.x_best - self.x)
+        self.v += self.G_INC * np.random.uniform() * (swarm.x_best - self.x)
+
+    def update_x(self, swarm):
+        # Update position
         self.x += self.v
-        return self.x
-    
-    def update_best(self, x, f):
+        self.x[self.x > self.X_MAX] = self.X_MAX
+        self.x[self.x < self.X_MIN] = self.X_MIN
+        # Store position
+        x = self.x.copy()
+        swarm.x_list.append(x)
+        # Evaluate fitness
+        f = swarm.evaluate_objective(x)
         if f <= self.f_best: self.x_best, self.f_best = x, f
 
         
@@ -231,7 +254,7 @@ class ParticleSwarm(Minimiser):
         self, objective=o.schwefel, max_evals=10000, n_dims=5, random_seed=0,
         x_min=-500, x_max=500,
         # Performance args:
-        num_particles=100,
+        num_particles=100, p_inc=2.0, g_inc=2.0, v_max=10.0, v_decay=0.9
     ):
         # Set random seed and objective function
         np.random.seed(random_seed)
@@ -243,43 +266,87 @@ class ParticleSwarm(Minimiser):
         self.n_evals = 0
         self.x_best, self.f_best = None, np.inf
 
-        particle_list = [
-            Particle(n_dims, x_min, x_max) for _ in range(num_particles)
-        ]
-        num_evals = 3 # not actually 3
-        for _ in range(num_evals):
-            # For each particle in the swarm
-            for p in particle_list:
-                x = p.move()
-                f = self.evaluate_objective(x)
-                p.update_best(x, f)
-                # ...
+        # Initialise particle swarm
+        self.particle_list = []
+        for _ in range(num_particles):
+            p = Particle(
+                n_dims, x_min, x_max, p_inc, g_inc, v_max, v_decay, swarm=self
+            )
+            if p.f_best < self.f_best:
+                self.x_best, self.f_best = p.x_best, p.f_best
+            self.particle_list.append(p)
 
+        # Start main loop
+        while self.n_evals < self.MAX_EVALS:
+            # Update velocities
+            for p in self.particle_list: p.update_v(self)
+            # Update positions
+            for p in self.particle_list: p.update_x(self)
+
+        return self.x_best, self.f_best
+    
+    def get_swarm_locations(self): return [p.x for p in self.particle_list]
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    # logging.basicConfig(level=logging.INFO)
+    # logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     ts = TabuSearch()
     # ts.minimise(max_evals=10000, n_dims=2, n_stm=7)
     # ts.minimise(max_evals=300, n_dims=2, n_stm=7)
     # print(ts.minimise(max_evals=3000, n_dims=2, n_stm=7))
     # print(ts.minimise(max_evals=10000, n_dims=2, n_stm=100, max_counter=100))
-    print(ts.minimise(max_evals=10000, n_dims=2, n_stm=10, max_counter=10, random_seed=3))
-    # print("\nx list:")
-    # for x in ts.x_list: print(x)
-    # print("\nf list:")
-    # for f in ts.f_list: print(f)
-    print("\nMTM x list:")
-    for x in ts.mtm_x: print(x)
-    print("\nMTM f list:")
-    for f in ts.mtm_f: print(f)
-    # plotting.plot_objective(
-    #     filename="Schwefel tabu", x_list=ts.x_list,
-    #     x_list_d=ts.x_diverse
+    # print(ts.minimise(max_evals=10000, n_dims=5, n_stm=100, max_counter=100, random_seed=0))
+    
+    # # print("\nx list:")
+    # # for x in ts.x_list: print(x)
+    # # print("\nf list:")
+    # # for f in ts.f_list: print(f)
+    # print("\nMTM x list:")
+    # for x in ts.mtm_x: print(x)
+    # print("\nMTM f list:")
+    # for f in ts.mtm_f: print(f)
+    # # plotting.plot_objective(
+    # #     filename="Schwefel tabu", x_list=ts.x_list,
+    # #     x_list_d=ts.x_diverse, x_list_i=ts.x_intense
+    # # )
+    # plotting.plot_fitness_history(
+    #     ts.f_list, filename="Schwefel fitness local search diversify"
     # )
-    plotting.plot_fitness_history(
-        ts.f_list, filename="Schwefel fitness local search diversify"
-    )
 
     pso = ParticleSwarm()
-    pso.minimise()
+    print(pso.minimise(
+        n_dims=1, random_seed=None, max_evals=10000,
+        p_inc=2, g_inc=2, num_particles=50, v_decay=0.5, v_max=1000
+    ))
+    # plotting.plot_objective(
+    #     filename="Schwefel PSO", x_list=pso.x_list
+    # )
+    # plotting.plot_objective(
+    #     filename="Schwefel PSO final swarm location",
+    #     x_list=pso.get_swarm_locations()
+    # )
+    plotting.plot_fitness_history(
+        pso.f_list, filename="Schwefel fitness PSO"
+    )
+    print(len(pso.x_list))
+
+
+    # pso = ParticleSwarm()
+    # print(pso.minimise(
+    #     objective=o.rosenbrock, x_min=-2, x_max=2,
+    #     n_dims=2, random_seed=None, max_evals=10000,
+    #     p_inc=2, g_inc=2, num_particles=50, v_decay=0.5, v_max=1000
+    # ))
+    # plotting.plot_objective(
+    #     objective=o.rosenbrock, x0lims=[-2, 2], x1lims=[-2, 2],
+    #     filename="Schwefel PSO", x_list=pso.x_list
+    # )
+    # plotting.plot_objective(
+    #     objective=o.rosenbrock, x0lims=[-2, 2], x1lims=[-2, 2],
+    #     filename="Schwefel PSO final swarm location",
+    #     x_list=pso.get_swarm_locations()
+    # )
+    # plotting.plot_fitness_history(
+    #     pso.f_list, filename="Schwefel fitness PSO"
+    # )
+    # print(len(pso.x_list))

@@ -1,26 +1,13 @@
 import numpy as np
+import logging
 from time import sleep
 
 import objectives as o
+import utils as u
 import plotting
 
-def check_reduce(*arg_list):
-    arg_set = set(arg_list)
-    assert len(arg_set) == 1
-    return arg_set.pop()
 
-class Solution():
-    def __init__(self, location, fitness):
-        self.location = location
-        self.fitness = fitness
-
-class TabuSearch():
-    def __init__(self): pass
-    
-    def reset_memory(self):
-        # Clear short and medium term memory and reset delta
-        self.stm, self.mtm_x, self.mtm_f = [], [], []
-        self.delta = self.DELTA_INITIAL
+class Minimiser():
     
     def evaluate_objective(self, x):
         # Wrapper for evaluating and recording the objective function
@@ -31,9 +18,33 @@ class TabuSearch():
         if f < self.f_best and self.n_evals <= self.MAX_EVALS:
             self.f_best = f
             self.x_best = x
-            print("***New best solution = {:.4}".format(f))
+            logging.info("nEval {}: New PB = {:.4}".format(self.n_evals, f))
         
         return f
+    
+    def minimise(
+        self, objective=o.schwefel, random_seed=0, max_evals=10000
+    ):
+        # Set random seed and objective function
+        np.random.seed(random_seed)
+        self.objective = objective
+        # Assign constant attributes
+        self.MAX_EVALS = max_evals
+        # Initialise variable attributes
+        self.x_list, self.f_list,  = [], []
+        self.n_evals = 0
+        self.x_best, self.f_best = None, np.inf
+        
+        raise NotImplementedError
+
+
+class TabuSearch(Minimiser):
+    def __init__(self): pass
+    
+    def reset_memory(self):
+        # Clear short and medium term memory and reset delta
+        self.stm, self.mtm_x, self.mtm_f = [], [], []
+        self.delta = self.DELTA_INITIAL
 
     # Check if x is in the short-term memory
     def x_in_stm(self, x): return any((x == xm).all() for xm in self.stm)
@@ -54,7 +65,7 @@ class TabuSearch():
             self.mtm_x.append(x)
             self.mtm_f.append(f)
             # If the MTM has exceeded max length, remove least fit items:
-            while check_reduce(len(self.mtm_x), len(self.mtm_f)) > self.N_MTM:
+            while u.reduce(len(self.mtm_x), len(self.mtm_f)) > self.N_MTM:
                 i_worst = self.mtm_f.index(max(self.mtm_f))
                 self.mtm_x.pop(i_worst)
                 self.mtm_f.pop(i_worst)
@@ -81,7 +92,7 @@ class TabuSearch():
                     f_list.append(self.evaluate_objective(xp))
         
         # If there are any non-tabu moves available:
-        if check_reduce(len(x_list), len(f_list)) > 0:
+        if u.reduce(len(x_list), len(f_list)) > 0:
             # Choose best allowed move:
             f_best = min(f_list)
             x_best = x_list[f_list.index(f_best)]
@@ -132,18 +143,18 @@ class TabuSearch():
         return x, f
 
     def minimise(
-        self, objective=o.schwefel, max_evals=10000, ndims=5, random_seed=0,
+        self, objective=o.schwefel, max_evals=10000, n_dims=5, random_seed=0,
+        x_min=-500, x_max=500,
+        # Performance args:
         n_stm=7, n_mtm=4, delta_initial=10, delta_reduction_factor=0.2,
-        # intensify_counter=12, diversify_counter=17, reduce_counter=25,
-        max_counter=25,
-        x_min=-500, x_max=500, min_reduction=1.0
+        max_counter=25, min_reduction=1.0
     ):
         # Set random seed and objective function
         np.random.seed(random_seed)
         self.objective = objective
         # Assign constant attributes
         self.MAX_EVALS = max_evals
-        self.N_DIMS = ndims
+        self.N_DIMS = n_dims
         self.N_STM, self.N_MTM = n_stm, n_mtm
         self.DELTA_INITIAL = delta_initial
         self.X_MIN, self.X_MAX = x_min, x_max
@@ -163,7 +174,7 @@ class TabuSearch():
             # Perform local search
             x_old, f_old = x_new, f_new
             x_new, f_new = self.local_search(x_old, f_old)
-            print("\nEval {}: Local search {:.4} -> {:.4}".format(self.n_evals, f_old, f_new))
+            u.log_local_search(self.n_evals, f_old, f_new)
             # Make pattern moves if the fitness is improving
             if f_new < f_old:
                 dx, pm_ok = x_new - x_old, True
@@ -172,71 +183,88 @@ class TabuSearch():
                 ]):
                     x_old, f_old = x_new, f_new
                     x_new, f_new, pm_ok = self.pattern_move(x_old, f_old, dx)
-                    print("Pattern move {:.4} -> {:.4}".format(f_old, f_new))
+                    u.log_pattern_move(f_old, f_new)
             # If previous local search didn't improve fitness, increase counter
             else:
                 counter += 1
-                print("Counter ->", counter)
+                u.log_counter(counter)
             # Intensify or diversify search if progress is not being made
             if counter >= max_counter:
                 x_old, f_old = x_new, f_new
                 x_new, f_new = self.intensify()
-                # Could be part of `intensify` method? :
                 self.delta = delta_reduction_factor * self.delta
-                print("Intensify {:.4} -> {:.4}".format(f_old, f_new))
-                # sleep(1)
+                u.log_intensify(f_old, f_new)
                 # If most recent intensification gave bad reduction in fitness
                 if not f_last_reduction - f_new > min_reduction:
                     # Diversify and start again
-                    print("Previous reduction {:.4} -> {:.4}".format(f_last_reduction, f_new))
+                    u.log_diversify(f_last_reduction, f_new)
                     x_new, f_new = self.diversify()
-                    print("Diversifying")
                 # Either way, reset baseline fitness and counter
                 f_last_reduction = f_new
                 counter = 0
-
-            # # Intensify search if progress is not made
-            # if counter >= intensify_counter:
-            #     x_old, f_old = x_new, f_new
-            #     x_new, f_new = self.intensify()
-            #     counter += 1
-            #     print("Intensify {:.4} -> {:.4}".format(f_old, f_new))
-
-            #     # Reduce step size if progress is not made
-            #     if counter >= reduce_counter:
-            #         # Check reduction in fitness from previous reduction
-            #         if f_last_reduction - f_new > min_reduction:
-            #             # If significant, reduce delta and continue searching
-            #             self.delta = delta_reduction_factor * self.delta
-            #             print("Reducing step size")
-            #             sleep(1)
-            #         # Otherwise diversify and start again
-            #         else:
-            #             x_new, f_new = self.diversify()
-            #             print("Diversifying"), sleep(1)
-            #         # Either way, reset baseline fitness and counter
-            #         f_last_reduction = f_new
-            #         counter = 0
-            # # Diversify search if progress is not made
-            # if counter == diversify_counter:
-            #     x_old, f_old = x_new, f_new
-            #     x_new, f_new = self.diversify()
-            #     counter += 1
-            #     print("Diversify {:.4} -> {:.4}".format(f_old, f_new))
-            #     # sleep(1)
-            # if counter >= max_counter: counter = 0
 
         self.f_list = self.f_list[:max_evals]
 
         return self.x_best, self.f_best
 
+class Particle():
+    def __init__(self, n_dims, x_min, x_max, more_args="..."):
+        # self.pbest = None
+        self.x = None
+        self.v = None
+        self.f_best = np.inf
+        self.x_best = None # (this one is actually none)
+        # ...
+    
+    def move(self, gbest):
+        self.v += None
+        self.x += self.v
+        return self.x
+    
+    def update_best(self, x, f):
+        if f <= self.f_best: self.x_best, self.f_best = x, f
+
+        
+
+class ParticleSwarm(Minimiser):
+    def minimise(
+        self, objective=o.schwefel, max_evals=10000, n_dims=5, random_seed=0,
+        x_min=-500, x_max=500,
+        # Performance args:
+        num_particles=100,
+    ):
+        # Set random seed and objective function
+        np.random.seed(random_seed)
+        self.objective = objective
+        # Assign constant attributes
+        self.MAX_EVALS = max_evals
+        # Initialise variable attributes
+        self.x_list, self.f_list,  = [], []
+        self.n_evals = 0
+        self.x_best, self.f_best = None, np.inf
+
+        particle_list = [
+            Particle(n_dims, x_min, x_max) for _ in range(num_particles)
+        ]
+        num_evals = 3 # not actually 3
+        for _ in range(num_evals):
+            # For each particle in the swarm
+            for p in particle_list:
+                x = p.move()
+                f = self.evaluate_objective(x)
+                p.update_best(x, f)
+                # ...
+
+
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    # logging.basicConfig(level=logging.INFO)
     ts = TabuSearch()
-    # ts.minimise(max_evals=10000, ndims=2, n_stm=7)
-    # ts.minimise(max_evals=300, ndims=2, n_stm=7)
-    # print(ts.minimise(max_evals=3000, ndims=2, n_stm=7))
-    print(ts.minimise(max_evals=10000, ndims=2, n_stm=100, max_counter=50))
-    # print(ts.minimise(max_evals=10000, ndims=5, n_stm=300, max_counter=100))
+    # ts.minimise(max_evals=10000, n_dims=2, n_stm=7)
+    # ts.minimise(max_evals=300, n_dims=2, n_stm=7)
+    # print(ts.minimise(max_evals=3000, n_dims=2, n_stm=7))
+    # print(ts.minimise(max_evals=10000, n_dims=2, n_stm=100, max_counter=100))
+    print(ts.minimise(max_evals=10000, n_dims=2, n_stm=10, max_counter=10, random_seed=3))
     # print("\nx list:")
     # for x in ts.x_list: print(x)
     # print("\nf list:")
@@ -245,10 +273,13 @@ if __name__ == "__main__":
     for x in ts.mtm_x: print(x)
     print("\nMTM f list:")
     for f in ts.mtm_f: print(f)
-    plotting.plot_objective(
-        filename="Schwefel local search", x_list=ts.x_list,
-        x_list_d=ts.x_diverse
-    )
+    # plotting.plot_objective(
+    #     filename="Schwefel tabu", x_list=ts.x_list,
+    #     x_list_d=ts.x_diverse
+    # )
     plotting.plot_fitness_history(
         ts.f_list, filename="Schwefel fitness local search diversify"
     )
+
+    pso = ParticleSwarm()
+    pso.minimise()

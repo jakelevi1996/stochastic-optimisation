@@ -39,8 +39,6 @@ class Minimiser():
 
 
 class TabuSearch(Minimiser):
-    def __init__(self): pass
-    
     def reset_memory(self):
         # Clear short and medium term memory and reset delta
         self.stm, self.mtm_x, self.mtm_f = [], [], []
@@ -247,14 +245,13 @@ class Particle():
         f = swarm.evaluate_objective(x)
         if f <= self.f_best: self.x_best, self.f_best = x, f
 
-        
 
 class ParticleSwarm(Minimiser):
     def minimise(
         self, objective=o.schwefel, max_evals=10000, n_dims=5, random_seed=0,
         x_min=-500, x_max=500,
         # Performance args:
-        num_particles=100, p_inc=2.0, g_inc=2.0, v_max=10.0, v_decay=0.9
+        num_particles=100, p_inc=2.0, g_inc=1.0, v_max=10.0, v_decay=0.9
     ):
         # Set random seed and objective function
         np.random.seed(random_seed)
@@ -269,11 +266,14 @@ class ParticleSwarm(Minimiser):
         # Initialise particle swarm
         self.particle_list = []
         for _ in range(num_particles):
+            # Initialise particle
             p = Particle(
                 n_dims, x_min, x_max, p_inc, g_inc, v_max, v_decay, swarm=self
             )
+            # Check against current global best
             if p.f_best < self.f_best:
                 self.x_best, self.f_best = p.x_best, p.f_best
+            # Add to swarm
             self.particle_list.append(p)
 
         # Start main loop
